@@ -7,13 +7,14 @@ import os
 from models.scrfd import SCRFD
 from models.arcface import ArcFace
 from utils.helpers import compute_similarity, build_targets
+from liveness_detect.FDM import predict_image
 
 app = FastAPI()
 
 # Cấu hình CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000/"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -44,6 +45,12 @@ async def face_recognition(file: UploadFile = File(...)):
         nparr = np.fromstring(contents, np.uint8)
         image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
+        # Kiểm tra liveness trước khi nhận diện khuôn mặt
+        liveness_result = predict_image(image)
+        if liveness_result == "Fake":
+            return {"success": False, "error": "Liveness check failed: Fake face detected"}
+
+        # Nếu là "Real", tiếp tục nhận diện khuôn mặt
         bboxes, kpss = detector.detect(image)
         
         results = []
@@ -70,6 +77,7 @@ async def face_recognition(file: UploadFile = File(...)):
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+
 @app.websocket("/ws/face-recognition")
 async def websocket_face_recognition(websocket: WebSocket):
     await websocket.accept()
@@ -79,6 +87,13 @@ async def websocket_face_recognition(websocket: WebSocket):
             nparr = np.frombuffer(data, np.uint8)
             image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
+            # 🔹 Kiểm tra liveness trước khi nhận diện khuôn mặt
+            liveness_result = predict_image(image)
+            if liveness_result == "Fake":
+                await websocket.send_json({"success": False, "error": "Liveness check failed: Fake face detected"})
+                continue  # Bỏ qua xử lý tiếp theo
+
+            # Nếu là "Real", tiếp tục nhận diện khuôn mặt
             bboxes, kpss = detector.detect(image)
             results = []
 
